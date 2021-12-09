@@ -15,7 +15,6 @@ pragma solidity ^0.8.0;
 //
 // (c) BokkyPooBah / Bok Consulting Pty Ltd 2021
 // ----------------------------------------------------------------------------
-import "./openzeppelin/utils/Strings.sol";
 
 interface IERC20Partial {
     function balanceOf(address tokenOwner) external view returns (uint balance);
@@ -479,12 +478,7 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
         }
         trade.netting[wethTo] += int(order.price);
     }
-event log(string name, address value);
-event log(string name, uint value);
-event log(string name, string value);
-event log(string name, bool value);
-event log(string name, uint[] value);
-event log(string name, address[] value);
+
     function transferNetted(Trade storage trade) private {
         for (uint i = 0; i < trade.uniqueAddresses.length; i++) {
             address account = trade.uniqueAddresses[i];
