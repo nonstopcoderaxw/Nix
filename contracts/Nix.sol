@@ -15,6 +15,7 @@ pragma solidity ^0.8.0;
 //
 // (c) BokkyPooBah / Bok Consulting Pty Ltd 2021
 // ----------------------------------------------------------------------------
+import "./openzeppelin/utils/Strings.sol";
 
 interface IERC20Partial {
     function balanceOf(address tokenOwner) external view returns (uint balance);
@@ -95,6 +96,62 @@ contract ReentrancyGuard {
     }
 }
 
+/// @author Alex W.(github.com/nonstopcoderaxw)
+/// @title array utility functions optimized for Nix
+library ArrayUtils {
+
+    /// @notice check if an array is sorted in ascending order
+    /// @param array the array to check
+    /// @param index the "to index" of the sub array to run recursion,
+    ///        the initial value should the length of the array
+    /// @return 0 - unsorted in ascending order
+    ///         1 - sorted in ascending order and no duplicated item
+    ///         2 - include duplicated item
+    function isAscSortedAndNoDup(uint256[] memory array, uint256 index) internal pure returns (uint256) {
+        // base case
+        if(index == 1) return 1;
+
+        //check sorting
+        if(array[index - 1] < array[index - 2])  return 0;
+
+        //check dup
+        if(array[index - 1] == array[index - 2]) return 2;
+
+        return isAscSortedAndNoDup(array, index - 1);
+    }
+
+    /// @notice check to see if an targeted item exists in a sorted array by divide & conquer
+    /// @param array the given sorted array
+    /// @param target the targeted item to the array
+    /// @return true - if exists, false - not found
+    function includes(uint256[] storage array,
+                          uint256 target)
+                          internal
+                          view
+                          returns (bool)
+    {
+        require(array.length < type(uint256).max / 2, "overflow");
+
+        uint256 left;
+        uint256 right = array.length - 1;
+        uint256 mid;
+
+        while (left <= right) {
+            mid = (left + right) / 2; //overflow case captured by "require" above
+
+            if (target == array[mid]) return true;
+
+            if (target < array[mid]) {
+                right = mid - 1;
+                continue;
+            }
+
+            left = mid + 1;
+        }
+
+        return false;
+    }
+}
 
 /// @author BokkyPooBah, Bok Consulting Pty Ltd
 /// @title Decentralised ERC-721 exchange
@@ -141,6 +198,7 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
         ExecutedOrder[] executedOrders;
     }
 
+    using ArrayUtils for uint[];
     // https://eips.ethereum.org/EIPS/eip-721
     bytes4 private constant ERC721_INTERFACE = 0x80ac58cd;
     bytes4 private constant ERC721METADATA_INTERFACE = 0x5b5e139f;
@@ -227,6 +285,7 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
             require(tokenIds.length > 0, "TokenIds");
             require(tradeMax <= 1, "Parcel");
         }
+        require(tokenIds.isAscSortedAndNoDup(tokenIds.length) == 1, "BadTokenIdList");
         require(royaltyFactor <= ROYALTYFACTOR_MAX, "Royalty");
 
         Token storage tokenInfo = tokens[token];
@@ -362,11 +421,7 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
                     if (order.tokenIds.length == 0) {
                         found = true;
                     } else {
-                        for (uint k = 0; k < order.tokenIds.length && !found; k++) {
-                            if (tokenIds[j] == order.tokenIds[k]) {
-                                found = true;
-                            }
-                        }
+                        found = order.tokenIds.includes(tokenIds[j]);
                     }
                     require(found, "TokenId");
                     IERC721Partial(tokenInfo.token).safeTransferFrom(nftFrom, nftTo, tokenIds[j]);
@@ -390,10 +445,12 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
             require(order.tradeCount <= order.tradeMax, "Maxxed");
             emit OrderExecuted(tokenInfo.token, orderIndexes[i], trades.length - 1, tokenIds);
         }
+
         require(trade.netting[msg.sender] == netAmount, "NetAmount");
         transferNetted(trade);
         handleTips(integrator);
     }
+
 
     function addNetting(Token storage tokenInfo, uint tokenId, Trade storage trade, Order memory order) private {
         (address wethTo, address wethFrom) = (order.buyOrSell == BuyOrSell.Buy) ? (msg.sender, order.maker) : (order.maker, msg.sender);
@@ -408,7 +465,7 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
         trade.netting[wethFrom] -= int(order.price);
         try royaltyEngine.getRoyaltyView(tokenInfo.token, tokenId, order.price) returns (address payable[] memory recipients, uint256[] memory amounts) {
             require(recipients.length == amounts.length);
-            uint royaltyFactor = (order.buyOrSell == BuyOrSell.Buy) ? trade.royaltyFactor : order.royaltyFactor;
+            uint royaltyFactor = (order.buyOrSell == BuyOrSell.Buy) ? trade.royaltyFactor : order.royaltyFactor; //???
             for (uint i = 0; i < recipients.length; i++) {
                 if (!trade.seen[recipients[i]]) {
                     trade.uniqueAddresses.push(recipients[i]);
@@ -422,6 +479,12 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
         }
         trade.netting[wethTo] += int(order.price);
     }
+event log(string name, address value);
+event log(string name, uint value);
+event log(string name, string value);
+event log(string name, bool value);
+event log(string name, uint[] value);
+event log(string name, address[] value);
     function transferNetted(Trade storage trade) private {
         for (uint i = 0; i < trade.uniqueAddresses.length; i++) {
             address account = trade.uniqueAddresses[i];

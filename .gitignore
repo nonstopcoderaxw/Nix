@@ -7,6 +7,7 @@ artifacts
 .DS_Store
 .project
 .settings
+hardhat.config.js
 scripts/raw/*.json
 scripts/osraw/*.json
 scripts/node_modules
