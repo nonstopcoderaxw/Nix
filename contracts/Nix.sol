@@ -100,47 +100,46 @@ contract ReentrancyGuard {
 library ArrayUtils {
 
     /// @notice check if an array is sorted in ascending order
-    /// @param array the array to check
+    /// @param self the array to check
     /// @param index the "to index" of the sub array to run recursion,
     ///        the initial value should the length of the array
     /// @return 0 - unsorted in ascending order
     ///         1 - sorted in ascending order and no duplicated item
     ///         2 - include duplicated item
-    function isAscSortedAndNoDup(uint256[] memory array, uint256 index) internal pure returns (uint256) {
+    function isAscSortedAndNoDup(uint256[] memory self,
+                                 uint256 index)
+                                 internal
+                                 pure
+                                 returns (uint256)
+    {
         // base case
         if(index == 1) return 1;
-
         //check sorting
-        if(array[index - 1] < array[index - 2])  return 0;
-
+        if(self[index - 1] < self[index - 2]) return 0;
         //check dup
-        if(array[index - 1] == array[index - 2]) return 2;
+        if(self[index - 1] == self[index - 2]) return 2;
 
-        return isAscSortedAndNoDup(array, index - 1);
+        return isAscSortedAndNoDup(self, index - 1);
     }
 
-    /// @notice check to see if an targeted item exists in a sorted array by divide & conquer
-    /// @param array the given sorted array
+    /// @notice divide-and-conquer check if an targeted item exists in a sorted array
+    /// @param self the given sorted array
     /// @param target the targeted item to the array
     /// @return true - if exists, false - not found
-    function includes(uint256[] storage array,
-                          uint256 target)
-                          internal
-                          view
-                          returns (bool)
+    function includes(uint256[] memory self,
+                      uint256 target)
+                      internal
+                      pure
+                      returns (bool)
     {
-        require(array.length < type(uint256).max / 2, "overflow");
-
         uint256 left;
-        uint256 right = array.length - 1;
+        uint256 right = self.length - 1;
         uint256 mid;
 
         while (left <= right) {
-            mid = (left + right) / 2; //overflow case captured by "require" above
-
-            if (target == array[mid]) return true;
-
-            if (target < array[mid]) {
+            mid = (left + right) / 2; //overflow can happen
+            if (target == self[mid]) return true;
+            if (target < self[mid]) {
                 right = mid - 1;
                 continue;
             }
@@ -257,7 +256,8 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
     /// @dev Add order
     /// @param token ERC-721 contract address
     /// @param taker Specific address, or null for any taker
-    /// @param tokenIds [] (empty) for any, [tokenId1, tokenId2, ...] for specific tokenIds. Must not be empty for All
+    /// @param tokenIds [] (empty) for any, [tokenId1, tokenId2, ...] for specific tokenIds. Must not be empty for All.
+    ///                    Must be sorted in ascending order and have no duplicates(error will be thrown)
     /// @param price Price per NFT for Any. Price for all specified NFTs for All
     /// @param buyOrSell (0) Buy, (1) Sell
     /// @param anyOrAll (0) Any, (1) All
@@ -415,12 +415,21 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
 
             (address nftFrom, address nftTo) = (order.buyOrSell == BuyOrSell.Buy) ? (msg.sender, order.maker) : (order.maker, msg.sender);
             if (order.anyOrAll == AnyOrAll.Any) {
+                //cahced order.tokenIds
+                uint256[] memory _orderTokenIds;
                 for (uint j = 0; j < tokenIds.length; j++) {
                     bool found = false;
                     if (order.tokenIds.length == 0) {
                         found = true;
                     } else {
-                        found = order.tokenIds.includes(tokenIds[j]);
+                          //cache storage into memory to avoid multiple sload on a same item
+                          if(_orderTokenIds.length == 0){
+                              _orderTokenIds = new uint256[](order.tokenIds.length);
+                              for(uint256 k = 0; k < _orderTokenIds.length; k++) {
+                                  _orderTokenIds[k] = order.tokenIds[k];
+                              }
+                          }
+                          found = _orderTokenIds.includes(tokenIds[j]);
                     }
                     require(found, "TokenId");
                     IERC721Partial(tokenInfo.token).safeTransferFrom(nftFrom, nftTo, tokenIds[j]);
@@ -464,7 +473,7 @@ contract Nix is Owned, ReentrancyGuard, ERC721TokenReceiver {
         trade.netting[wethFrom] -= int(order.price);
         try royaltyEngine.getRoyaltyView(tokenInfo.token, tokenId, order.price) returns (address payable[] memory recipients, uint256[] memory amounts) {
             require(recipients.length == amounts.length);
-            uint royaltyFactor = (order.buyOrSell == BuyOrSell.Buy) ? trade.royaltyFactor : order.royaltyFactor; //???
+            uint royaltyFactor = (order.buyOrSell == BuyOrSell.Buy) ? trade.royaltyFactor : order.royaltyFactor;
             for (uint i = 0; i < recipients.length; i++) {
                 if (!trade.seen[recipients[i]]) {
                     trade.uniqueAddresses.push(recipients[i]);
